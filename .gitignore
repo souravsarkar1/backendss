@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Production / Build outputs
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Environment & Sensitive Files
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.cert
+*.pfx
+*.pkcs12
+
+# Logs & Debugging
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor Settings
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-workspace
+*.sublime-project
+*.swp
+*.swo
+
+# Coverage & Testing
+coverage/
+.nyc_output/
+
+# Temporary / Cache Files
+.temp/
+.tmp/
+.cache/
