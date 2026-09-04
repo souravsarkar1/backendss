@@ -32,17 +32,24 @@ const formatOrderResponse = (order: any) => {
     paymentStatus: order.paymentStatus,
     paymentDetails: order.paymentDetails,
     status: order.status,
+    courierPartner: order.courierPartner,
+    trackingNumber: order.trackingNumber,
+    trackingUrl: order.trackingUrl,
+    adminNotes: order.adminNotes,
+    timeline: order.timeline || [],
     cancellationReason: order.cancellationReason,
     cancelledAt: order.cancelledAt,
-    address: `${order.shippingAddress?.address || ""}, ${order.shippingAddress?.city || ""}, ${order.shippingAddress?.state || ""
-      } - ${order.shippingAddress?.postalCode || ""}`,
+    user: order.user,
+    address: `${order.shippingAddress?.address || ""}, ${order.shippingAddress?.city || ""}, ${
+      order.shippingAddress?.state || ""
+    } - ${order.shippingAddress?.postalCode || ""}`,
     shippingAddress: order.shippingAddress,
     estimated: order.estimatedDelivery
       ? new Date(order.estimatedDelivery).toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
       : "5–7 Days",
     estimatedDelivery: order.estimatedDelivery,
     items: (order.items || []).map((it: any) => ({
@@ -673,6 +680,9 @@ export const getOrderTrackingController = async (
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,
       paymentDetails: order.paymentDetails,
+      courierPartner: order.courierPartner,
+      trackingNumber: order.trackingNumber,
+      trackingUrl: order.trackingUrl,
       estimatedDelivery: order.estimatedDelivery,
       cancellationReason: order.cancellationReason,
       cancelledAt: order.cancelledAt,
@@ -683,3 +693,303 @@ export const getOrderTrackingController = async (
     next(error);
   }
 };
+
+/**
+ * Admin: Get all orders with search, filters, pagination, and KPI summary stats
+ */
+export const getAdminOrdersController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const {
+      search,
+      status,
+      paymentStatus,
+      paymentMethod,
+      startDate,
+      endDate,
+      page = "1",
+      limit = "50",
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query as Record<string, string>;
+
+    const query: any = {};
+
+    // Status filter
+    if (status && status !== "all") {
+      if (status === "pending_action") {
+        query.status = { $in: ["Order Placed", "Confirmed"] };
+      } else if (status === "in_transit") {
+        query.status = { $in: ["Shipped", "Out for Delivery"] };
+      } else {
+        query.status = status;
+      }
+    }
+
+    // Payment status filter
+    if (paymentStatus && paymentStatus !== "all") {
+      query.paymentStatus = paymentStatus;
+    }
+
+    // Payment method filter
+    if (paymentMethod && paymentMethod !== "all") {
+      query.paymentMethod = paymentMethod;
+    }
+
+    // Date range filter
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
+
+    // Search filter across multiple fields
+    if (search && search.trim()) {
+      const regex = new RegExp(search.trim(), "i");
+      query.$or = [
+        { orderId: regex },
+        { "shippingAddress.fullName": regex },
+        { "shippingAddress.email": regex },
+        { "shippingAddress.phone": regex },
+        { "shippingAddress.city": regex },
+        { "items.name": regex },
+      ];
+    }
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 50));
+    const skip = (pageNum - 1) * limitNum;
+    const sort: any = { [sortBy]: sortOrder === "asc" ? 1 : -1 };
+
+    const [orders, totalMatched, allOrders] = await Promise.all([
+      Order.find(query)
+        .populate("user", "name email phone role")
+        .sort(sort)
+        .skip(skip)
+        .limit(limitNum),
+      Order.countDocuments(query),
+      Order.find({}, "totalAmount status paymentStatus paymentMethod createdAt"),
+    ]);
+
+    // Compute live operational summary stats
+    let totalRevenue = 0;
+    let pendingCount = 0;
+    let processingCount = 0;
+    let shippedCount = 0;
+    let deliveredCount = 0;
+    let cancelledCount = 0;
+    let codCount = 0;
+    let onlineCount = 0;
+
+    for (const o of allOrders) {
+      if (o.status !== "Cancelled") {
+        totalRevenue += o.totalAmount || 0;
+      }
+      if (o.status === "Order Placed" || o.status === "Confirmed") {
+        pendingCount++;
+      } else if (o.status === "Processing") {
+        processingCount++;
+      } else if (o.status === "Shipped" || o.status === "Out for Delivery") {
+        shippedCount++;
+      } else if (o.status === "Delivered") {
+        deliveredCount++;
+      } else if (o.status === "Cancelled") {
+        cancelledCount++;
+      }
+
+      if (o.paymentMethod === "cod") {
+        codCount++;
+      } else {
+        onlineCount++;
+      }
+    }
+
+    const formattedOrders = orders.map((o) => formatOrderResponse(o));
+
+    sendSuccess(res, 200, "Admin orders retrieved successfully", {
+      orders: formattedOrders,
+      stats: {
+        totalOrders: allOrders.length,
+        totalRevenue,
+        pendingCount,
+        processingCount,
+        shippedCount,
+        deliveredCount,
+        cancelledCount,
+        codCount,
+        onlineCount,
+      },
+      pagination: {
+        total: totalMatched,
+        page: pageNum,
+        totalPages: Math.ceil(totalMatched / limitNum),
+        limit: limitNum,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Admin: Get single order details with user & history
+ */
+export const getAdminOrderByIdController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    const order = await Order.findOne({
+      $or: [{ orderId: id }, { _id: id?.match(/^[0-9a-fA-F]{24}$/) ? id : undefined }],
+    }).populate("user", "name email phone role address");
+
+    if (!order) {
+      sendError(res, 404, "Order not found");
+      return;
+    }
+
+    sendSuccess(res, 200, "Order details retrieved", {
+      order: formatOrderResponse(order),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Admin: Update order status, tracking, courier, or admin notes
+ */
+export const updateAdminOrderStatusController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const {
+      status,
+      paymentStatus,
+      courierPartner,
+      trackingNumber,
+      trackingUrl,
+      estimatedDelivery,
+      adminNotes,
+      cancellationReason,
+    } = req.body;
+
+    const order = await Order.findOne({
+      $or: [{ orderId: id }, { _id: id?.match(/^[0-9a-fA-F]{24}$/) ? id : undefined }],
+    });
+
+    if (!order) {
+      sendError(res, 404, "Order not found");
+      return;
+    }
+
+    const previousStatus = order.status;
+
+    if (status) {
+      order.status = status;
+      if (status === "Cancelled" && !order.cancelledAt) {
+        order.cancelledAt = new Date();
+        order.cancellationReason = cancellationReason || "Cancelled by store administrator";
+      }
+      if (status === "Delivered" && order.paymentMethod === "cod") {
+        order.paymentStatus = "paid";
+      }
+    }
+
+    if (paymentStatus) {
+      order.paymentStatus = paymentStatus;
+    }
+
+    if (courierPartner !== undefined) {
+      order.courierPartner = courierPartner;
+    }
+
+    if (trackingNumber !== undefined) {
+      order.trackingNumber = trackingNumber;
+    }
+
+    if (trackingUrl !== undefined) {
+      order.trackingUrl = trackingUrl;
+    }
+
+    if (adminNotes !== undefined) {
+      order.adminNotes = adminNotes;
+    }
+
+    if (estimatedDelivery) {
+      order.estimatedDelivery = new Date(estimatedDelivery);
+    }
+
+    // Add timeline record if status changed
+    if (status && status !== previousStatus) {
+      if (!order.timeline) order.timeline = [];
+      order.timeline.push({
+        status,
+        message: `Status updated to ${status} by admin (${req.user?.name || "Admin"})`,
+        timestamp: new Date(),
+        updatedBy: req.user?.email || "Admin",
+      });
+    }
+
+    await order.save();
+
+    sendSuccess(res, 200, "Order updated successfully", {
+      order: formatOrderResponse(order),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Admin: Get detailed analytics & sales charts
+ */
+export const getAdminOrderStatsController = async (
+  _req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 });
+
+    const totalOrders = orders.length;
+    let totalRevenue = 0;
+    const statusCounts: Record<string, number> = {};
+    const paymentMethodCounts: Record<string, number> = { cod: 0, razorpay: 0, online: 0 };
+    const recentOrders = orders.slice(0, 5).map((o) => formatOrderResponse(o));
+
+    for (const o of orders) {
+      if (o.status !== "Cancelled") {
+        totalRevenue += o.totalAmount || 0;
+      }
+      statusCounts[o.status] = (statusCounts[o.status] || 0) + 1;
+      if (o.paymentMethod) {
+        paymentMethodCounts[o.paymentMethod] = (paymentMethodCounts[o.paymentMethod] || 0) + 1;
+      }
+    }
+
+    sendSuccess(res, 200, "Admin order statistics retrieved", {
+      totalOrders,
+      totalRevenue,
+      statusCounts,
+      paymentMethodCounts,
+      recentOrders,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

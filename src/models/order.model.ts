@@ -56,6 +56,16 @@ export interface IOrder extends Document {
     | "Out for Delivery"
     | "Delivered"
     | "Cancelled";
+  courierPartner?: string;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  adminNotes?: string;
+  timeline?: Array<{
+    status: string;
+    message: string;
+    timestamp: Date;
+    updatedBy?: string;
+  }>;
   cancellationReason?: string;
   cancelledAt?: Date;
   estimatedDelivery: Date;
@@ -194,6 +204,30 @@ const orderSchema = new Schema<IOrder>(
       default: "Order Placed",
       index: true,
     },
+    courierPartner: {
+      type: String,
+      trim: true,
+    },
+    trackingNumber: {
+      type: String,
+      trim: true,
+    },
+    trackingUrl: {
+      type: String,
+      trim: true,
+    },
+    adminNotes: {
+      type: String,
+      trim: true,
+    },
+    timeline: [
+      {
+        status: String,
+        message: String,
+        timestamp: { type: Date, default: Date.now },
+        updatedBy: String,
+      },
+    ],
     cancellationReason: {
       type: String,
       trim: true,

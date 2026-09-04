@@ -30,12 +30,15 @@ const isValidQueryValue = (val?: string): val is string => {
 };
 
 const buildSort = (sort?: string): Record<string, 1 | -1> | { score: { $meta: "textScore" } } => {
+  console.log(sort, "line 33")
   switch (sort) {
     case "price_asc":
     case "price_low_high":
+    case "price_low":
       return { price: 1 };
     case "price_desc":
     case "price_high_low":
+    case "price_high":
       return { price: -1 };
     case "newest":
       return { createdAt: -1 };
@@ -67,7 +70,7 @@ export const getProductsController = async (
       sort,
       isFeatured,
     } = req.query as ProductQuery;
-    console.log("hited")
+    console.log(sort, "line 70")
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.min(50, Math.max(1, Number(limit) || 12));
     const skip = (pageNum - 1) * limitNum;
@@ -112,7 +115,7 @@ export const getProductsController = async (
     }
 
     const sortOption = buildSort(sort);
-
+    console.log(sortOption, "line 115")
     let products: any[] = [];
     let total = 0;
 
@@ -128,7 +131,6 @@ export const getProductsController = async (
     }
 
     const totalPages = Math.ceil(total / limitNum) || 1;
-    console.log(products)
     sendSuccess(res, 200, "Products retrieved successfully", {
       products,
       pagination: {
