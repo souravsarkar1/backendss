@@ -33,6 +33,10 @@ app.use(
       if (
         !origin ||
         origin === env.CLIENT_URL ||
+        origin === "https://www.urbanapex.in" ||
+        origin === "https://urbanapex.in" ||
+        origin === "http://www.urbanapex.in" ||
+        origin === "http://urbanapex.in" ||
         origin === "https://santipur-saree.vercel.app" ||
         /^https:\/\/santipur-saree(-[a-zA-Z0-9]+)?\.vercel\.app$/.test(origin) ||
         origin.startsWith("http://localhost:") ||
